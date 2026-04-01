@@ -85,48 +85,76 @@ def run_perea_algorithm(choice):
     candidate_hubs = sorted(sub_bc, key=sub_bc.get, reverse=True)[:10]
 
     best_geo_eff = -1
-    best_G_node = None
-    best_setup = ""
+    best_setup = None
 
     print(
         f"-> Commencing nested loops: Testing multiple discrete locations on {len(candidate_tracks)} tracks, connecting to {len(candidate_hubs)} different hubs..."
     )
 
+    # Pre-calculate track distances to avoid repeat lookups
+    track_distances = {track: main_comp[track[0]][track[1]]["distance"] for track in candidate_tracks}
+
     # NESTED LOOP 1: Iterate over the tracks (The Rail Line)
     for track in candidate_tracks:
-        track_dist = main_comp[track[0]][track[1]]["distance"]
+        track_dist = track_distances[track]
+        u_idx, v_idx = node_to_idx[track[0]], node_to_idx[track[1]]
 
         # NESTED LOOP 2: Discretize the track (Testing 25%, 50%, and 75% marks)
         for discrete_point in [0.25, 0.50, 0.75]:
-            # NESTED LOOP 3: Iterate over possible road connections
+            dist_from_u = track_dist * discrete_point
+            dist_from_v = track_dist * (1.0 - discrete_point)
+
+            # NESTED LOOP 3: Iterate over the hubs (The connection to the road)
             for hub in candidate_hubs:
-                if hub in track:
-                    continue  # Don't connect the station to a node it's already sitting next to
+                hub_idx = node_to_idx[hub]
+                
+                # OPTIMIZED: Calculate distance to new node X
+                # dist(i, X) = min(dist(i, u) + duX, dist(i, v) + dvX, dist(i, h) + dhX)
+                duX, dvX, dhX = dist_from_u, dist_from_v, 1.5
+                dist_to_X = np.minimum(
+                    dist_matrix[:, [u_idx]] + duX,
+                    np.minimum(
+                        dist_matrix[:, [v_idx]] + dvX,
+                        dist_matrix[:, [hub_idx]] + dhX
+                    )
+                )
 
-                # Build the temporary test graph
-                G_test = main_comp.copy()
-                G_test.remove_edge(*track)
+                # Update matrix: min(dist(i,j), dist(i,X) + dist(X,j))
+                new_dist_matrix = np.minimum(dist_matrix, dist_to_X + dist_to_X.T)
 
-                dist_from_u = track_dist * discrete_point
-                dist_from_v = track_dist * (1.0 - discrete_point)
+                with np.errstate(divide="ignore"):
+                    inv_dist = 1.0 / new_dist_matrix
+                np.fill_diagonal(inv_dist, 0)
+                sum_existing = np.sum(inv_dist)
 
-                new_node = "NEW_RELIEF_HUB"
-                G_test.add_node(new_node)
-                G_test.add_edge(track[0], new_node, distance=dist_from_u)
-                G_test.add_edge(new_node, track[1], distance=dist_from_v)
-                G_test.add_edge(new_node, hub, distance=1.5)  # The new connection link
+                with np.errstate(divide="ignore"):
+                    inv_to_X = 1.0 / dist_to_X
+                inv_to_X[inv_to_X == np.inf] = 0
+                sum_to_X = np.sum(inv_to_X) * 2
 
-                # RECALCULATE EVERYTHING (This is why their algorithm is slow!)
-                test_eff = get_all_metrics(G_test)[1]
+                total_eff = (sum_existing + sum_to_X) / ((N + 1) * N)
 
-                if test_eff > best_geo_eff:
-                    best_geo_eff = test_eff
-                    best_G_node = G_test.copy()
-                    best_setup = f"Station placed {discrete_point * 100}% down track {track[0]}-{track[1]}, connected to {hub}"
+                if total_eff > best_geo_eff:
+                    best_geo_eff = total_eff
+                    best_setup = (track, discrete_point, hub)
 
     print(f"-> Enumerative Search Complete in {time.time() - start_time:.2f} seconds.")
-    print(f"-> Best Enumerative Result: {best_setup}")
-    results.append(["With Relief Node (Their Algo)", *get_all_metrics(best_G_node)])
+    
+    # Physically build the absolute best solution found
+    best_track, best_p, best_hub = best_setup
+    G_test = main_comp.copy()
+    G_test.remove_edge(*best_track)
+    
+    new_node = "NEW_RELIEF_HUB"
+    G_test.add_node(new_node)
+    dist_u = main_comp[best_track[0]][best_track[1]]["distance"] * best_p
+    dist_v = main_comp[best_track[0]][best_track[1]]["distance"] * (1.0 - best_p)
+    G_test.add_edge(best_track[0], new_node, distance=dist_u)
+    G_test.add_edge(new_node, best_track[1], distance=dist_v)
+    G_test.add_edge(new_node, best_hub, distance=1.5)
+
+    print(f"-> Best Enumerative Result: Station {best_p*100}% down {best_track}, connected to {best_hub}")
+    results.append(["With Relief Node (Their Algo)", *get_all_metrics(G_test)])
 
     # --- FINAL SUMMARY TABLE ---
     df_res = pd.DataFrame(
@@ -143,6 +171,7 @@ def run_perea_algorithm(choice):
     print(f" FINAL RESEARCH DATASET: {name.upper()} ")
     print("=" * 85)
     print(df_res.to_string(index=False))
+    return df_res
 
 
 if __name__ == "__main__":

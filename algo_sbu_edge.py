@@ -55,7 +55,7 @@ def run_sbu_algorithm(choice):
     except:
         ec = nx.degree_centrality(main_comp)  # Fallback if matrix fails to converge
 
-    candidates = sorted(ec, key=ec.get, reverse=True)[:40]  # Top 40 structural hubs
+    candidates = sorted(ec, key=ec.get, reverse=True)[:20]  # Top 20 structural hubs
 
     best_nc = -float("inf")
     best_edge = None
@@ -184,6 +184,7 @@ def run_sbu_algorithm(choice):
     print(f" FINAL RESEARCH DATASET: {name.upper()} ")
     print("=" * 85)
     print(df_res.to_string(index=False))
+    return df_res
 
 
 if __name__ == "__main__":
