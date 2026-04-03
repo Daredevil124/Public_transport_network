@@ -174,6 +174,7 @@ def run_our_algorithm(choice):
     print(f" FINAL RESEARCH DATASET: {name.upper()} ")
     print("=" * 85)
     print(df_res.to_string(index=False))
+    return df_res
 
 
 if __name__ == "__main__":
